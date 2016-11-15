@@ -1,12 +1,14 @@
-package com.software_ninja.malabar.project;
+package com.software_ninja.malabar.project
 
+import org.apache.maven.artifact.repository.ArtifactRepository
+import org.apache.maven.artifact.repository.ArtifactRepositoryFactory;
 import org.apache.maven.execution.MavenSession;
 
 import org.apache.maven.execution.MavenExecutionResult;
 
 import org.apache.maven.execution.DefaultMavenExecutionResult;
 
-import org.apache.maven.execution.DefaultMavenExecutionRequest;
+import org.apache.maven.execution.DefaultMavenExecutionRequest
 
 import org.apache.maven.project.ProjectBuildingRequest;
 
@@ -15,11 +17,12 @@ import org.apache.maven.project.ProjectBuildingResult;
 import org.apache.maven.execution.MavenExecutionRequestPopulator;
 
 import org.apache.maven.execution.MavenExecutionRequest;
-import org.apache.maven.project.ProjectBuilder;
-
+import org.apache.maven.project.ProjectBuilder
+import org.apache.maven.settings.MavenSettingsBuilder
+import org.apache.maven.settings.Profile
 
 import java.util.logging.Level;
-import org.codehaus.plexus.DefaultPlexusContainer;
+
 import org.apache.maven.project.ProjectBuildingException;
 import org.apache.maven.execution.MavenExecutionRequestPopulationException;
 
@@ -37,7 +40,7 @@ import org.codehaus.plexus.configuration.PlexusConfigurationException;
 import org.sonatype.aether.RepositorySystemSession;
 import org.sonatype.aether.util.DefaultRepositorySystemSession;
 import com.jcabi.aether.Aether
-import org.sonatype.aether.repository.RemoteRepository;
+
 import org.sonatype.aether.util.artifact.DefaultArtifact;
 import org.sonatype.aether.artifact.Artifact;
 
@@ -46,8 +49,10 @@ import org.sonatype.aether.graph.DependencyNode
 @Log
 public class MavenProjectsCreator {
   public List<MavenProject> create(String repo, String pom) {
-    Settings mavenSettings = new Settings();
-    mavenSettings.setLocalRepository(repo);
+    //Settings mavenSettings = new Settings();
+      MavenSettingsBuilder msb = getPlexusContainer().lookup(MavenSettingsBuilder.class)
+      Settings mavenSettings = msb.buildSettings()
+
     File pomFile = new File(pom);
     if (!pomFile.exists()) {
       throw new Exception(String.format("Unable to create Maven project model. The POM file %s does not exist.", pomFile));
@@ -64,17 +69,29 @@ public class MavenProjectsCreator {
     //using jarjar for maven3 classes affects the contents of the effective pom
     //references to certain Maven standard plugins contain jarjar in the fqn
     //not sure if this is a problem.
-    ContainerConfiguration containerConfiguration = new DefaultContainerConfiguration()
-    .setClassWorld(new ClassWorld("plexus.core", ClassWorld.class.getClassLoader()))
-    .setName("mavenCore");
-    DefaultPlexusContainer container = new DefaultPlexusContainer(containerConfiguration);
+    DefaultPlexusContainer container = getPlexusContainer();
     ProjectBuilder builder = container.lookup(ProjectBuilder.class);
     MavenExecutionRequest executionRequest = new DefaultMavenExecutionRequest();
     final Properties properties = new Properties(System.getProperties());
     //    properties.putAll(SystemProperties.asMap());
     executionRequest.setSystemProperties(properties);
     MavenExecutionRequestPopulator populator = container.lookup(MavenExecutionRequestPopulator.class);
+
     populator.populateFromSettings(executionRequest, settings);
+      ArtifactRepositoryFactory arf = container.lookup(ArtifactRepositoryFactory.class);
+
+      executionRequest.getProfiles().each { p ->
+          List<String> activeProfiles = executionRequest.getActiveProfiles();
+          if (activeProfiles.contains(p.getId())) {
+              p.getRepositories().each { r ->
+                  ArtifactRepository repo = arf.createArtifactRepository(
+                          r.getId(),r.getUrl(),ArtifactRepositoryFactory.DEFAULT_LAYOUT_ID,
+                          r.getSnapshots(),r.getReleases());
+                  executionRequest.addRemoteRepository(repo);
+                  executionRequest.addPluginArtifactRepository(repo);
+              };
+          }
+      }
     populator.populateDefaults(executionRequest);
     ProjectBuildingRequest buildingRequest = executionRequest.getProjectBuildingRequest();
     buildingRequest.setProcessPlugins(false);
@@ -102,6 +119,14 @@ public class MavenProjectsCreator {
     session.setCurrentProject(mavenProject);
     return reactorProjects;
   }
+
+    private DefaultPlexusContainer getPlexusContainer() {
+        ContainerConfiguration containerConfiguration = new DefaultContainerConfiguration()
+                .setClassWorld(new ClassWorld("plexus.core", ClassWorld.class.getClassLoader()))
+                .setName("mavenCore");
+        DefaultPlexusContainer container = new DefaultPlexusContainer(containerConfiguration);
+        return container;
+    }
 
 
   public Map resolveDependencies(MavenProject project, repo, scope) {
